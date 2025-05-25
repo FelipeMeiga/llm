@@ -29,6 +29,7 @@ Tensor* tensor_reshape(const Tensor *A, int ndim, const int *new_shape);
 Tensor* tensor_transpose(const Tensor *A, int dim0, int dim1);
 
 void tensor_relu(Tensor *A);
+Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA);
 void tensor_softmax(Tensor *A, int axis);
 
 float tensor_get(const Tensor *t, const int *coords);

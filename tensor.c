@@ -444,3 +444,30 @@ void tensor_set(Tensor *t, const int *coords, float value) {
     t->data[idx] = value;
 }
 
+Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA) {
+    if (pre->ndim != dA->ndim) {
+        fprintf(stderr,
+                "tensor_relu_backward: ndim mismatch (pre.ndim=%d, dA.ndim=%d)\n",
+                pre->ndim, dA->ndim);
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < pre->ndim; ++i) {
+        if (pre->shape[i] != dA->shape[i]) {
+            fprintf(stderr,
+                    "tensor_relu_backward: shape mismatch on dim %d (pre=%d, dA=%d)\n",
+                    i, pre->shape[i], dA->shape[i]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    Tensor *dY = tensor_new(dA->ndim, dA->shape);
+    if (!dY) {
+        fprintf(stderr, "tensor_relu_backward: failed to allocate output\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (size_t k = 0; k < pre->size; ++k) {
+        dY->data[k] = (pre->data[k] > 0.0f ? dA->data[k] : 0.0f);
+    }
+    return dY;
+}

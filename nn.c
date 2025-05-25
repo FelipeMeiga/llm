@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "nn.h"
 #include "tensor.h"
@@ -40,6 +41,8 @@ Linear* linear_new(int in_dim, int out_dim) {
         exit(EXIT_FAILURE);
     }
 
+    lin->X = NULL;
+
     return lin;
 }
 
@@ -70,31 +73,52 @@ void linear_free(Linear *lin) {
 }
 
 Tensor* linear_forward(Linear *lin, const Tensor *X) {
-    if (!lin || !X) {
-        fprintf(stderr, "linear_forward: NULL pointer argument\n");
+    if (X->ndim!=2 || X->shape[1]!=lin->in_dim) {
+        fprintf(stderr, "linear_forward: expected X shape [B,%d], got [%d,%d]\n", lin->in_dim, X->shape[0], X->shape[1]);
         exit(EXIT_FAILURE);
     }
-    if (X->ndim != 2 || X->shape[1] != lin->in_dim) {
-        fprintf(stderr,
-                "linear_forward: input X must be 2D with shape[1]=in_dim (got ndim=%d, shape[1]=%d, in_dim=%d)\n",
-                X->ndim, X->shape[1], lin->in_dim);
-        exit(EXIT_FAILURE);
-    }
+
+    lin->X = (Tensor*)X;
 
     Tensor *Y = tensor_matmul(X, lin->W);
-    if (!Y) {
-        fprintf(stderr, "linear_forward: failed to compute X·W\n");
-        exit(EXIT_FAILURE);
-    }
-
-    int batch    = X->shape[0];
-    int out_dim  = lin->out_dim;
-    for (int i = 0; i < batch; ++i) {
-        for (int j = 0; j < out_dim; ++j) {
-            size_t idxY = i * Y->stride[0] + j * Y->stride[1];
-            Y->data[idxY] += lin->b->data[j];
+    int B = X->shape[0];
+    for (int i = 0; i < B; ++i) {
+        for (int j = 0; j < lin->out_dim; ++j) {
+            size_t idx = i*Y->stride[0] + j*Y->stride[1];
+            Y->data[idx] += lin->b->data[j];
         }
     }
-
     return Y;
+}
+
+Tensor* linear_backward(Linear *lin, const Tensor *dY) {
+    if (!lin->X) {
+        fprintf(stderr, "linear_backward: no saved input (lin->X is NULL)\n");
+        exit(EXIT_FAILURE);
+    }
+    Tensor *X = lin->X;
+    int B   = X->shape[0];
+    int Din = lin->in_dim;
+    int Dout= lin->out_dim;
+
+    Tensor *Xt = tensor_transpose(X, 0, 1);
+    Tensor *new_dW = tensor_matmul(Xt, dY);
+    tensor_free(Xt);
+    tensor_free(lin->dW);
+    lin->dW = new_dW;
+
+    for (int j = 0; j < Dout; ++j) {
+        float s = 0.0f;
+        for (int i = 0; i < B; ++i) {
+            size_t idx = i*dY->stride[0] + j*dY->stride[1];
+            s += dY->data[idx];
+        }
+        lin->db->data[j] = s;
+    }
+
+    Tensor *Wt = tensor_transpose(lin->W, 0, 1);
+    Tensor *dX = tensor_matmul(dY, Wt);
+    tensor_free(Wt);
+
+    return dX;
 }

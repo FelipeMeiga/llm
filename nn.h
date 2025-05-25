@@ -3,18 +3,21 @@
 
 #include "tensor.h"
 
-typedef struct linear {
+typedef struct {
+    int in_dim;
+    int out_dim;
     Tensor *W;
     Tensor *b;
     Tensor *dW;
     Tensor *db;
-    int in_dim;
-    int out_dim;
+    Tensor *X;
 } Linear;
 
 Linear* linear_new(int in_dim, int out_dim);
 void linear_show(Linear* l);
 void linear_free(Linear *lin);
+
 Tensor* linear_forward(Linear *lin, const Tensor *X);
+Tensor* linear_backward(Linear *lin, const Tensor *dY);
 
 #endif
