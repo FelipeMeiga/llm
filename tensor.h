@@ -31,6 +31,8 @@ Tensor* tensor_transpose(const Tensor *A, int dim0, int dim1);
 void tensor_relu(Tensor *A);
 Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA);
 void tensor_softmax(Tensor *A, int axis);
+Tensor* tensor_sigmoid(Tensor *A);
+Tensor* tensor_sigmoid_backward(const Tensor *sig, const Tensor *dA);
 
 float tensor_get(const Tensor *t, const int *coords);
 void tensor_set(Tensor *t, const int *coords, float value);

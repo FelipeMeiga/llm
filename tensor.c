@@ -361,6 +361,22 @@ void tensor_relu(Tensor *A) {
     }
 }
 
+Tensor* tensor_sigmoid(Tensor *A) {
+  for (size_t i = 0; i < A->size; ++i) {
+    A->data[i] = 1.0f/(1.0f + expf(-A->data[i]));
+  }
+  return A;
+}
+
+Tensor* tensor_sigmoid_backward(const Tensor *sig, const Tensor *dA) {
+  Tensor *dZ = tensor_new(sig->ndim, sig->shape);
+  for (size_t i = 0; i < sig->size; ++i) {
+    float s = sig->data[i];
+    dZ->data[i] = dA->data[i] * s * (1.0f - s);
+  }
+  return dZ;
+}
+
 static void _vector_softmax(Tensor *A, int axis, int *coords) {
     int len = A->shape[axis];
     size_t stride = A->stride[axis];
