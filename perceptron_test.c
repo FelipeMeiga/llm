@@ -16,7 +16,7 @@ int main(void) {
     float beta2 = 0.999f;
     float eps = 1e-8f;
 
-    int epochs = 10000;
+    int epochs = 400;
 
     float X_data[4][2] = {{0,0},{0,1},{1,0},{1,1}};
     float Y_data[4][1] = {{0},{1},{1},{0}};
