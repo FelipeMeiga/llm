@@ -2,16 +2,21 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "nn.h"
+#include "linear.h"
 #include "tensor.h"
 
 int main(void) {
-    int batch      = 4;
-    int in_dim     = 2;
-    int hidden_dim = 2;
-    int out_dim    = 1;
-    float lr       = 0.05f;
-    int   epochs   = 10000;
+    int batch = 4;
+    int in_dim = 4;
+    int hidden_dim = 4;
+    int out_dim = 1;
+
+    float lr = 0.01f;
+    float beta1 = 0.9f;
+    float beta2 = 0.999f;
+    float eps = 1e-8f;
+
+    int epochs = 10000;
 
     float X_data[4][2] = {{0,0},{0,1},{1,0},{1,1}};
     float Y_data[4][1] = {{0},{1},{1},{0}};
@@ -28,41 +33,37 @@ int main(void) {
         Y->data[i*out_dim] = Y_data[i][0];
 
     // 2->2->1
-    Linear *l1 = linear_new(in_dim,     hidden_dim);
+    Linear *l1 = linear_new(in_dim, hidden_dim);
     Linear *l2 = linear_new(hidden_dim, out_dim);
 
     for (int e = 1; e <= epochs; ++e) {
-        Tensor *Y1 = linear_forward(l1, X); // [4×2]
+        // forward
+        Tensor *Y1 = linear_forward(l1, X);
         Tensor *A1 = tensor_reshape(Y1, 2, (int[]){batch, hidden_dim});
         tensor_relu(Y1);
-        Tensor *Z2 = linear_forward(l2, Y1); // [4×1]
+        Tensor *Z2 = linear_forward(l2, Y1);
         tensor_sigmoid(Z2);
 
+        // loss and gradient
         float bce = 0.0f;
-        Tensor *dY2 = tensor_new(2, shapeY); // [4×1]
+        Tensor *dY2 = tensor_new(2, shapeY);
         for (size_t k = 0; k < Z2->size; ++k) {
             float y_true = Y->data[k];
             float y_pred = Z2->data[k];
-            
             bce += - (y_true*logf(y_pred + 1e-8f) + (1.0f-y_true)*logf(1.0f-y_pred + 1e-8f));
-                    
             dY2->data[k] = ( -y_true/(y_pred+1e-8f) + (1.0f-y_true)/(1.0f-y_pred+1e-8f) ) / batch;
         }
         bce /= batch;
 
-        Tensor *dZ2 = tensor_sigmoid_backward(Z2, dY2); // [4×1]
-        Tensor *dA1 = linear_backward(l2, dZ2); // [4×2]
-        Tensor *dY1 = tensor_relu_backward(A1, dA1); // [4×2]
-        Tensor *dX  = linear_backward(l1, dY1); // [4×2]
+        // backward
+        Tensor *dZ2 = tensor_sigmoid_backward(Z2, dY2);
+        Tensor *dA1 = linear_backward(l2, dZ2);
+        Tensor *dY1 = tensor_relu_backward(A1, dA1);
+        Tensor *dX  = linear_backward(l1, dY1);
 
-        for (size_t i = 0; i < l2->W->size; ++i)
-            l2->W->data[i] -= lr * l2->dW->data[i];
-        for (size_t i = 0; i < l2->b->size; ++i)
-            l2->b->data[i] -= lr * l2->db->data[i];
-        for (size_t i = 0; i < l1->W->size; ++i)
-            l1->W->data[i] -= lr * l1->dW->data[i];
-        for (size_t i = 0; i < l1->b->size; ++i)
-            l1->b->data[i] -= lr * l1->db->data[i];
+        // Adam updates 
+        linear_update_adam(l2, lr, beta1, beta2, eps);
+        linear_update_adam(l1, lr, beta1, beta2, eps);
 
         tensor_free(Y1);
         tensor_free(A1);

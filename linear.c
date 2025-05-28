@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "linear.h"
 #include "tensor.h"
@@ -42,6 +43,11 @@ Linear* linear_new(int in_dim, int out_dim) {
     }
 
     lin->X = NULL;
+    lin->mW = tensor_zeros(2, shapeW);
+    lin->vW = tensor_zeros(2, shapeW);
+    lin->mb = tensor_zeros(1, shapeB);
+    lin->vb = tensor_zeros(1, shapeB);
+    lin->t  = 0;
 
     return lin;
 }
@@ -121,4 +127,28 @@ Tensor* linear_backward(Linear *lin, const Tensor *dY) {
     tensor_free(Wt);
 
     return dX;
+}
+
+void linear_update_adam(Linear *lin, float lr, float beta1, float beta2, float eps) {
+    lin->t += 1;
+    float b1t = powf(beta1, lin->t);
+    float b2t = powf(beta2, lin->t);
+
+    for (size_t i = 0; i < lin->W->size; ++i) {
+        float g  = lin->dW->data[i];
+        float m  = lin->mW->data[i] = beta1*lin->mW->data[i] + (1-beta1)*g;
+        float v  = lin->vW->data[i] = beta2*lin->vW->data[i] + (1-beta2)*g*g;
+        float m_hat = m / (1 - b1t);
+        float v_hat = v / (1 - b2t);
+        lin->W->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps);
+    }
+
+    for (size_t i = 0; i < lin->b->size; ++i) {
+        float g  = lin->db->data[i];
+        float m  = lin->mb->data[i] = beta1*lin->mb->data[i] + (1-beta1)*g;
+        float v  = lin->vb->data[i] = beta2*lin->vb->data[i] + (1-beta2)*g*g;
+        float m_hat = m / (1 - b1t);
+        float v_hat = v / (1 - b2t);
+        lin->b->data[i] -= lr * m_hat / (sqrtf(v_hat) + eps);
+    }
 }
