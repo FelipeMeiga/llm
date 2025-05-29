@@ -36,6 +36,7 @@ Tensor* tensor_sigmoid_backward(const Tensor *sig, const Tensor *dA);
 
 float tensor_get(const Tensor *t, const int *coords);
 void tensor_set(Tensor *t, const int *coords, float value);
+void tensor_dropout(Tensor *A, float p);
 
 void tensor_show(Tensor *t);
 

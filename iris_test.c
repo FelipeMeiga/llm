@@ -70,7 +70,7 @@ int main(void) {
     int iris_y[MAX_SAMPLES];
     int n = load_iris_csv("iris-dataset/Iris.csv", iris_X, iris_y, MAX_SAMPLES);
     if (n < 0) {
-        fprintf(stderr, "Erroe reading iris.csv\n");
+        fprintf(stderr, "Error reading iris.csv\n");
         return 1;
     }
     printf("Saved %d samples from Iris.\n", n);
@@ -108,7 +108,7 @@ int main(void) {
     Linear *l1 = linear_new(FEATURES, 16);
     Linear *l2 = linear_new(16, CLASSES);
 
-    float lr = 0.005f;
+    float lr = 0.01f;
     float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f;
     int epochs = 2000;
 
@@ -116,6 +116,7 @@ int main(void) {
         // forward train
         Tensor *Y1 = linear_forward(l1, X_train);
         tensor_relu(Y1);
+        tensor_dropout(Y1, 0.1f);
         Tensor *Z2 = linear_forward(l2, Y1);
         tensor_softmax(Z2, 1);
 

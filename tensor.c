@@ -487,3 +487,14 @@ Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA) {
     }
     return dY;
 }
+
+void tensor_dropout(Tensor *A, float p) {
+    for (size_t i = 0; i < A->size; ++i) {
+        float u = (float)rand() / (float)RAND_MAX;
+        if (u < p) {
+            A->data[i] = 0.0f;
+        } else {
+            A->data[i] /= (1.0f - p);
+        }
+    }
+}
