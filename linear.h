@@ -1,5 +1,5 @@
-#ifndef NN_H
-#define NN_H
+#ifndef LINEAR_H
+#define LINEAR_H
 
 #include "tensor.h"
 
