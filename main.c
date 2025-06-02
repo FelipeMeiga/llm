@@ -8,6 +8,8 @@
 #include "tensor.h"
 #include "linear.h"
 #include "utils.h"
+#include "attention.h"
+#include "bpe.h"
 
 #define EPOCHS 1
 
@@ -23,11 +25,9 @@ static Tensor* softmax_and_grad(const Tensor *logits, int target_id) {
         fprintf(stderr, " Error allocating probs at softmax_and_grad\n");
         exit(1);
     }
-    
     for (int j = 0; j < V; ++j) {
         probs->data[j] = logits->data[j];
     }
-    
     float maxv = -INFINITY;
     for (int j = 0; j < V; ++j) {
         if (probs->data[j] > maxv) maxv = probs->data[j];
@@ -40,7 +40,6 @@ static Tensor* softmax_and_grad(const Tensor *logits, int target_id) {
     for (int j = 0; j < V; ++j) {
         probs->data[j] /= sum;
     }
-    
     Tensor *dY = tensor_new(2, (int[]){1, V});
     if (!dY) {
         fprintf(stderr, " Error allocating dY at softmax_and_grad\n");
@@ -103,8 +102,7 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    char line[MAX_LINE];
-
+    char line[4096];
     int max_ids = 4096;
     int *ids = malloc(sizeof(int) * max_ids);
     if (!ids) {
@@ -112,16 +110,11 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    Tensor *x_input = tensor_new(2, (int[]){1, D});
-    Tensor *logits  = NULL;
-    Tensor *dY      = NULL;
-    Tensor *dX      = NULL;
-
     for (int epoch = 0; epoch < EPOCHS; epoch++) {
         printf("=== Epoch %d ===\n", epoch + 1);
         fseek(fc, 0, SEEK_SET);
-
         long step = 0;
+
         while (fgets(line, sizeof(line), fc)) {
             size_t L = strlen(line);
             if (L > 0 && (line[L-1] == '\n' || line[L-1] == '\r')) {
@@ -136,6 +129,7 @@ int main(int argc, char **argv) {
 
             while (word) {
                 int wlen = (int)strlen(word);
+                
                 char **symbols = malloc(sizeof(char*) * (wlen + 1));
                 int sym_sz = 0;
                 for (int i = 0; i < wlen; i++) {
@@ -148,8 +142,7 @@ int main(int argc, char **argv) {
                 sym_sz++;
 
                 while (1) {
-                    int best_rank = INT_MAX;
-                    int best_i    = -1;
+                    int best_rank = INT_MAX, best_i = -1;
                     for (int i = 0; i < sym_sz - 1; i++) {
                         for (int m = 0; m < merges_size; m++) {
                             if (strcmp(symbols[i], merges[m].first) == 0 &&
@@ -170,7 +163,6 @@ int main(int argc, char **argv) {
                     char *merged = malloc(la + lb + 1);
                     strcpy(merged, symbols[best_i]);
                     strcat(merged, symbols[best_i+1]);
-
                     free(symbols[best_i]);
                     free(symbols[best_i+1]);
                     symbols[best_i] = merged;
@@ -196,17 +188,32 @@ int main(int argc, char **argv) {
             }
             free(text_copy);
 
-            for (int i = 0; i < n_ids - 1; i++) {
-                int id_in  = ids[i];
-                int id_out = ids[i+1];
+            if (n_ids < 2) continue;
 
-                memcpy(x_input->data, embedding_matrix[id_in], sizeof(float) * D);
+            int T = n_ids;
+            Tensor *X = tensor_new(2, (int[]){ T, D });
+            for (int t = 0; t < T; t++) {
+                int sid = ids[t];
+                memcpy(X->data + (size_t)t * D, embedding_matrix[sid], sizeof(float) * D);
+            }
 
-                logits = linear_forward(lm, x_input);
-                dY = softmax_and_grad(logits, id_out);
-                dX = linear_backward(lm, dY);
+            Tensor *C = scaled_dot_product_attention(X, X, X);
+
+            for (int t = 0; t < T - 1; t++) {
+                Tensor *ctx = tensor_new(2, (int[]){1, D});
+                memcpy(ctx->data, C->data + (size_t)t * D, sizeof(float) * D);
+
+                int id_target = ids[t + 1];
+
+                Tensor *logits = linear_forward(lm, ctx);
+
+                Tensor *dY = softmax_and_grad(logits, id_target);
+
+                Tensor *dX = linear_backward(lm, dY);
+
                 linear_update_adam(lm, LR, BETA1, BETA2, EPS);
 
+                tensor_free(ctx);
                 tensor_free(logits);
                 tensor_free(dY);
                 tensor_free(dX);
@@ -217,12 +224,15 @@ int main(int argc, char **argv) {
                     fflush(stdout);
                 }
             }
+
+            tensor_free(X);
+            tensor_free(C);
         }
+
         printf("\nEnd of epoch %d, total steps: %ld\n", epoch + 1, step);
     }
 
     fclose(fc);
-    tensor_free(x_input);
     free(ids);
 
 cleanup:
