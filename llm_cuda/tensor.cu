@@ -1,8 +1,10 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
+#include "curand_kernel.h"
 
 #include "tensor.hu"
 #include "utils.h"
@@ -13,16 +15,32 @@ __global__ void tensor_add_kernel(const float *A, const float *B, float *out, si
         out[idx] = A[idx] + B[idx];
 }
 
+__global__ void tensor_sub_kernel(const float *A, const float *B, float *out, size_t elems_this_chunk) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < elems_this_chunk)
+        out[idx] = A[idx] - B[idx];
+}
+
 __global__ void tensor_ones_kernel(float *data, size_t elems_this_chunk) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < elems_this_chunk)
         data[idx] = 1.0f;
 }
 
-__global__ void tensor_sub_kernel(const float *A, const float *B, float *out, size_t elems_this_chunk) {
+__global__ void tensor_zeros_kernel(float *data, size_t elems_this_chunk) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < elems_this_chunk)
-        out[idx] = A[idx] - B[idx];
+        data[idx] = 0.0f;
+}
+
+__global__ void tensor_rand_kernel(float *data, size_t elems_this_chunk, unsigned long long seed) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < elems_this_chunk) {
+        curandState_t state;
+        curand_init(seed, idx, 0, &state);
+
+        data[idx] = curand_uniform(&state);
+    }
 }
 
 Tensor *tensor_new(int ndim, const int *shape) {
@@ -207,6 +225,69 @@ Tensor* tensor_ones_cuda(int ndim, const int *shape, size_t chunk_size) {
     return t;
 }
 
+Tensor* tensor_zeros_cuda(int ndim, const int *shape, size_t chunk_size) {
+    Tensor *t = tensor_new(ndim, shape);
+    if (!t) return NULL;
+
+    size_t N = t->size;
+    size_t num_chunks = (N + chunk_size - 1) / chunk_size;
+    size_t bytes_chunk = chunk_size * sizeof(float);
+
+    float *d_data;
+    cudaMalloc((void**)&d_data, bytes_chunk);
+
+    const int threads_per_block = 256;
+
+    for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+        size_t offset = chunk_idx * chunk_size;
+        size_t elems_this_chunk = chunk_size;
+        if (offset + elems_this_chunk > N) {
+            elems_this_chunk = N - offset;
+        }
+        size_t bytes_this = elems_this_chunk * sizeof(float);
+
+        int blocks_per_grid = (int)((elems_this_chunk + threads_per_block - 1) / threads_per_block);
+        tensor_zeros_kernel<<<blocks_per_grid, threads_per_block>>>(d_data, elems_this_chunk);
+        cudaDeviceSynchronize();
+        cudaMemcpy(t->data + offset, d_data, bytes_this, cudaMemcpyDeviceToHost);
+    }
+
+    cudaFree(d_data);
+    return t;
+}
+
+Tensor* tensor_rand_cuda(int ndim, const int *shape, size_t chunk_size) {
+    Tensor *t = tensor_new(ndim, shape);
+    if (!t) return NULL;
+
+    size_t N = t->size;
+    size_t num_chunks = (N + chunk_size - 1) / chunk_size;
+    size_t bytes_chunk = chunk_size * sizeof(float);
+
+    float *d_data;
+    cudaMalloc((void**)&d_data, bytes_chunk);
+
+    const int threads_per_block = 256;
+
+    for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+        size_t offset = chunk_idx * chunk_size;
+        size_t elems_this_chunk = chunk_size;
+        if (offset + elems_this_chunk > N) {
+            elems_this_chunk = N - offset;
+        }
+        size_t bytes_this = elems_this_chunk * sizeof(float);
+
+        int blocks_per_grid = (int)((elems_this_chunk + threads_per_block - 1) / threads_per_block);
+        unsigned long long seed = (unsigned long long)time(NULL);
+        tensor_rand_kernel<<<blocks_per_grid, threads_per_block>>>(d_data, elems_this_chunk, seed);
+        cudaDeviceSynchronize();
+        cudaMemcpy(t->data + offset, d_data, bytes_this, cudaMemcpyDeviceToHost);
+    }
+
+    cudaFree(d_data);
+    return t;
+}
+
 static size_t tensor_index(const Tensor *t, const int *coords) {
     size_t offset = 0;
     for (int d = 0; d < t->ndim; ++d) {
@@ -260,16 +341,37 @@ void tensor_show(Tensor *t) {
     free(coords);
 }
 
-int main(void) {
-    const int shape[2] = {2, 2};
+void tensor_free(Tensor *t) {
+    free(t->shape);
+    free(t->stride);
+    free(t->data);
+    free(t);
+}
 
-    Tensor *A = tensor_ones_cuda(2, shape);
-    Tensor *B = tensor_ones_cuda(2, shape);
+void cuda_get_info() {
+    int nDevices;
 
-    Tensor *out = tensor_new(2, shape);
-    tensor_sub_cuda(out, A, B, 256);
-
-    tensor_show(out);
-    
-    return 0;
+    cudaGetDeviceCount(&nDevices);
+    for (int i = 0; i < nDevices; i++) {
+        cudaDeviceProp prop;
+        cudaGetDeviceProperties(&prop, i);
+        printf("  Device Number: %d\n", i);
+        printf("  Device name: %s\n", prop.name);
+        printf("  Memory Clock Rate (KHz): %d\n",
+               prop.memoryClockRate);
+        printf("  Memory Bus Width (bits): %d\n",prop.memoryBusWidth);
+        printf("  Peak Memory Bandwidth (GB/s): %f\n\n",
+               2.0*prop.memoryClockRate*(prop.memoryBusWidth/8)/1.0e6);
+        printf("  Total global memory: %lu\n", prop.totalGlobalMem);
+        printf("  Compute capability: %d.%d\n",
+               prop.major, prop.minor);
+        printf("  Number of SMs: %d\n",
+               prop.multiProcessorCount);
+        printf("  Max threads per block: %d\n",
+               prop.maxThreadsPerBlock);
+        printf("  Max threads dimensions: x = %d, y = %d, z = %d\n",
+               prop.maxThreadsDim[0], prop.maxThreadsDim[1], prop.maxThreadsDim[2]);
+        printf("  Max grid dimensions: x = %d, y = %d, z = %d\n",
+               prop.maxGridSize[0], prop.maxGridSize[1], prop.maxGridSize[2]);
+    }
 }
