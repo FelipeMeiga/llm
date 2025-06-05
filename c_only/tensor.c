@@ -152,7 +152,7 @@ Tensor* tensor_rand(int ndim, const int *shape) {
     return t;
 }
 
-void tensor_add(Tensor *out, const Tensor *A, const Tensor *B) {
+void tensor_add(Tensor *out, const Tensor *A, const Tensor *B) { //tega
     if (A->ndim != B->ndim || A->ndim != out->ndim) {
         fprintf(stderr, "tensor_add: incompatible dimensions\n");
         exit(EXIT_FAILURE);
@@ -170,7 +170,7 @@ void tensor_add(Tensor *out, const Tensor *A, const Tensor *B) {
     }
 }
 
-void tensor_sub(Tensor *out, const Tensor *A, const Tensor *B) {
+void tensor_sub(Tensor *out, const Tensor *A, const Tensor *B) { //tega 
     if (A->ndim != B->ndim || A->ndim != out->ndim) {
         fprintf(stderr, "tensor_add: incompatible dimensions\n");
         exit(EXIT_FAILURE);
@@ -188,7 +188,7 @@ void tensor_sub(Tensor *out, const Tensor *A, const Tensor *B) {
     }
 }
 
-void tensor_scale(Tensor *out, const Tensor *A, float alpha) {
+void tensor_scale(Tensor *out, const Tensor *A, float alpha) { //tega 
     if (A->ndim != out->ndim) {
         fprintf(stderr, "tensor_scale: incompatible dimensions (A.ndim=%d, out.ndim=%d)\n",
                 A->ndim, out->ndim);
@@ -207,7 +207,7 @@ void tensor_scale(Tensor *out, const Tensor *A, float alpha) {
     }
 }
 
-void tensor_mul(Tensor *out, const Tensor *A, const Tensor *B) {
+void tensor_mul(Tensor *out, const Tensor *A, const Tensor *B) { //tega
     if (A->ndim != B->ndim || A->ndim != out->ndim) {
         fprintf(stderr,
                 "tensor_mul: dimension mismatch (A.ndim=%d, B.ndim=%d, out.ndim=%d)\n", A->ndim, B->ndim, out->ndim);
@@ -226,7 +226,7 @@ void tensor_mul(Tensor *out, const Tensor *A, const Tensor *B) {
     }
 }
 
-Tensor* tensor_matmul(const Tensor *A, const Tensor *B) {
+Tensor* tensor_matmul(const Tensor *A, const Tensor *B) { //tega
     if (A->ndim != 2 || B->ndim != 2) {
         fprintf(stderr, "tensor_matmul: only 2d tensors are suported (A.ndim=%d, B.ndim=%d)\n", A->ndim, B->ndim);
         exit(EXIT_FAILURE);
@@ -263,7 +263,7 @@ Tensor* tensor_matmul(const Tensor *A, const Tensor *B) {
     return C;
 }
 
-Tensor* tensor_reshape(const Tensor *A, int ndim, const int *new_shape) {
+Tensor* tensor_reshape(const Tensor *A, int ndim, const int *new_shape) { //tega
     
     size_t new_size = 1;
     for (int i = 0; i < ndim; ++i) {
@@ -287,7 +287,7 @@ Tensor* tensor_reshape(const Tensor *A, int ndim, const int *new_shape) {
     return t;
 }
 
-Tensor* tensor_transpose(const Tensor *A, int dim0, int dim1) {
+Tensor* tensor_transpose(const Tensor *A, int dim0, int dim1) { //tega 
     if (A->ndim < 2) {
         fprintf(stderr, "tensor_transpose: tensor must have >= 2 dims (ndim=%d)\n", A->ndim);
         exit(EXIT_FAILURE);
@@ -348,7 +348,7 @@ Tensor* tensor_transpose(const Tensor *A, int dim0, int dim1) {
     return T;
 }
 
-void tensor_relu(Tensor *A) {
+void tensor_relu(Tensor *A) { //tega 
     if (!A) {
         fprintf(stderr, "tensor_relu: input tensor is NULL\n");
         exit(EXIT_FAILURE);
@@ -361,14 +361,14 @@ void tensor_relu(Tensor *A) {
     }
 }
 
-Tensor* tensor_sigmoid(Tensor *A) {
+Tensor* tensor_sigmoid(Tensor *A) { //tega 
   for (size_t i = 0; i < A->size; ++i) {
     A->data[i] = 1.0f/(1.0f + expf(-A->data[i]));
   }
   return A;
 }
 
-Tensor* tensor_sigmoid_backward(const Tensor *sig, const Tensor *dA) {
+Tensor* tensor_sigmoid_backward(const Tensor *sig, const Tensor *dA) { //tega
   Tensor *dZ = tensor_new(sig->ndim, sig->shape);
   for (size_t i = 0; i < sig->size; ++i) {
     float s = sig->data[i];
@@ -377,7 +377,7 @@ Tensor* tensor_sigmoid_backward(const Tensor *sig, const Tensor *dA) {
   return dZ;
 }
 
-static void _vector_softmax(Tensor *A, int axis, int *coords) {
+static void _vector_softmax(Tensor *A, int axis, int *coords) { //tega
     int len = A->shape[axis];
     size_t stride = A->stride[axis];
 
@@ -405,7 +405,7 @@ static void _vector_softmax(Tensor *A, int axis, int *coords) {
     }
 }
 
-static void _softmax_rec(Tensor *A, int axis, int dim, int *coords) {
+static void _softmax_rec(Tensor *A, int axis, int dim, int *coords) { //tega
     if (dim == A->ndim) {
         _vector_softmax(A, axis, coords);
         return;
@@ -421,7 +421,7 @@ static void _softmax_rec(Tensor *A, int axis, int dim, int *coords) {
     }
 }
 
-void tensor_softmax(Tensor *A, int axis) {
+void tensor_softmax(Tensor *A, int axis) { //tega 
     if (!A) {
         fprintf(stderr, "tensor_softmax: input tensor is NULL\n");
         exit(EXIT_FAILURE);
@@ -460,7 +460,7 @@ void tensor_set(Tensor *t, const int *coords, float value) {
     t->data[idx] = value;
 }
 
-Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA) {
+Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA) { //tega
     if (pre->ndim != dA->ndim) {
         fprintf(stderr,
                 "tensor_relu_backward: ndim mismatch (pre.ndim=%d, dA.ndim=%d)\n",
@@ -488,7 +488,7 @@ Tensor* tensor_relu_backward(const Tensor *pre, const Tensor *dA) {
     return dY;
 }
 
-void tensor_dropout(Tensor *A, float p) {
+void tensor_dropout(Tensor *A, float p) { //tega 
     for (size_t i = 0; i < A->size; ++i) {
         float u = (float)rand() / (float)RAND_MAX;
         if (u < p) {
