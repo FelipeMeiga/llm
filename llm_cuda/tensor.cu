@@ -45,12 +45,11 @@ __global__ void tensor_zeros_kernel(float *data, size_t elems_this_chunk) {
         data[idx] = 0.0f;
 }
 
-__global__ void tensor_rand_kernel(float *data, size_t elems_this_chunk, unsigned long long seed) {
+__global__ void tensor_rand_kernel(float *data, size_t elems_this_chunk, int chunk_seed) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < elems_this_chunk) {
         curandState_t state;
-        curand_init(seed, idx, 0, &state);
-
+        curand_init(chunk_seed, idx, 0, &state);
         data[idx] = curand_uniform(&state);
     }
 }
@@ -461,23 +460,33 @@ Tensor* tensor_rand_cuda(int ndim, const int *shape, size_t chunk_size) {
     size_t num_chunks = (N + chunk_size - 1) / chunk_size;
     size_t bytes_chunk = chunk_size * sizeof(float);
 
-    float *d_data;
-    cudaMalloc((void**)&d_data, bytes_chunk);
+    float *d_data = NULL;
+    cudaError_t err = cudaMalloc((void**)&d_data, bytes_chunk);
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc(d_data) failed: %s\n", cudaGetErrorString(err));
+        tensor_free(t);
+        return NULL;
+    }
 
     const int threads_per_block = 256;
+
+    unsigned long long seed_base = (unsigned long long)time(NULL);
 
     for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
         size_t offset = chunk_idx * chunk_size;
         size_t elems_this_chunk = chunk_size;
-        if (offset + elems_this_chunk > N) {
+        if (offset + elems_this_chunk > N) 
             elems_this_chunk = N - offset;
-        }
+
         size_t bytes_this = elems_this_chunk * sizeof(float);
 
+        int chunk_seed = rand();
+
         int blocks_per_grid = (int)((elems_this_chunk + threads_per_block - 1) / threads_per_block);
-        unsigned long long seed = (unsigned long long)time(NULL);
-        tensor_rand_kernel<<<blocks_per_grid, threads_per_block>>>(d_data, elems_this_chunk, seed);
+
+        tensor_rand_kernel<<<blocks_per_grid, threads_per_block>>>(d_data, elems_this_chunk, chunk_seed);
         cudaDeviceSynchronize();
+
         cudaMemcpy(t->data + offset, d_data, bytes_this, cudaMemcpyDeviceToHost);
     }
 
@@ -573,19 +582,21 @@ void cuda_get_info() {
     }
 }
 
-// int main(void) {
-//     int ndim = 2;
-//     int shape[ndim] = {6, 6};
+int main(void) {
+    srand(time(NULL));
+    
+    int ndim = 2;
+    int shape[ndim] = {6, 6};
 
-//     Tensor *A = tensor_rand_cuda(ndim, shape);
-//     tensor_show(A);
+    Tensor *A = tensor_rand_cuda(ndim, shape);
+    tensor_show(A);
 
-//     Tensor *B = tensor_rand_cuda(ndim, shape);
-//     tensor_show(B);
+    Tensor *B = tensor_rand_cuda(ndim, shape);
+    tensor_show(B);
 
-//     Tensor *out = tensor_new(ndim, shape);
-//     tensor_matmul_cuda(out, A, B);
-//     tensor_show(out);
+    Tensor *out = tensor_new(ndim, shape);
+    tensor_matmul_cuda(out, A, B);
+    tensor_show(out);
 
-//     return 0;
-// }
+    return 0;
+}
