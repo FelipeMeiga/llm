@@ -27,6 +27,12 @@ __global__ void tensor_scale_kernel(const float *A, const float alpha, float *ou
         out[idx] = A[idx] * alpha;
 }
 
+__global__ void tensor_mul_kernel(const float *A, const float *B, float *out, size_t elems_this_chunk) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < elems_this_chunk)
+        out[idx] = A[idx] * B[idx];
+}
+
 __global__ void tensor_ones_kernel(float *data, size_t elems_this_chunk) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < elems_this_chunk)
@@ -151,12 +157,12 @@ void tensor_add_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size) {
 
 void tensor_sub_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size) {
     if (A->ndim != B->ndim || A->ndim != out->ndim) {
-        fprintf(stderr, "tensor_add_cuda: incompatible dimensions (ndim)\n");
+        fprintf(stderr, "tensor_sub_cuda: incompatible dimensions (ndim)\n");
         exit(EXIT_FAILURE);
     }
     for (int i = 0; i < A->ndim; ++i) {
         if (A->shape[i] != B->shape[i] || A->shape[i] != out->shape[i]) {
-            fprintf(stderr, "tensor_add_cuda: diferent shapes in dimension %d (A=%d, B=%d, out=%d)\n", i, A->shape[i], B->shape[i], out->shape[i]);
+            fprintf(stderr, "tensor_sub_cuda: diferent shapes in dimension %d (A=%d, B=%d, out=%d)\n", i, A->shape[i], B->shape[i], out->shape[i]);
             exit(EXIT_FAILURE);
         }
     }
@@ -201,12 +207,12 @@ void tensor_sub_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size) {
 
 void tensor_scale_cuda(Tensor *out, Tensor *A, float alpha, size_t chunk_size) {
     if (A->ndim != out->ndim) {
-        fprintf(stderr, "tensor_add_cuda: incompatible dimensions (ndim)\n");
+        fprintf(stderr, "tensor_scale_cuda: incompatible dimensions (ndim)\n");
         exit(EXIT_FAILURE);
     }
     for (int i = 0; i < A->ndim; ++i) {
         if (A->shape[i] != out->shape[i]) {
-            fprintf(stderr, "tensor_add_cuda: diferent shapes in dimension %d (A=%d, out=%d)\n", i, A->shape[i], out->shape[i]);
+            fprintf(stderr, "tensor_scale_cuda: diferent shapes in dimension %d (A=%d, out=%d)\n", i, A->shape[i], out->shape[i]);
             exit(EXIT_FAILURE);
         }
     }
@@ -243,6 +249,56 @@ void tensor_scale_cuda(Tensor *out, Tensor *A, float alpha, size_t chunk_size) {
     }
 
     cudaFree(d_A);
+    cudaFree(d_out);
+}
+
+void tensor_mul_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size) {
+    if (A->ndim != B->ndim || A->ndim != out->ndim) {
+        fprintf(stderr, "tensor_mul_cuda: incompatible dimensions (ndim)\n");
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < A->ndim; ++i) {
+        if (A->shape[i] != B->shape[i] || A->shape[i] != out->shape[i]) {
+            fprintf(stderr, "tensor_mul_cuda: diferent shapes in dimension %d (A=%d, B=%d, out=%d)\n", i, A->shape[i], B->shape[i], out->shape[i]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    size_t N = A->size;
+    size_t num_chunks = (N + chunk_size - 1) / chunk_size;
+
+    size_t bytes_chunk = chunk_size * sizeof(float);
+    float *d_A = NULL, *d_B = NULL, *d_out = NULL;
+    
+    cudaMalloc((void**)&d_A, bytes_chunk);
+    cudaMalloc((void**)&d_B, bytes_chunk);
+    cudaMalloc((void**)&d_out, bytes_chunk);
+
+    const int threads_per_block = 256;
+
+    for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+        size_t offset = chunk_idx * chunk_size;
+
+        size_t elems_this_chunk = chunk_size;
+        if (offset + elems_this_chunk > N) {
+            elems_this_chunk = N - offset;
+        }
+        size_t bytes_this_chunk = elems_this_chunk * sizeof(float);
+
+        cudaMemcpy(d_A, A->data + offset, bytes_this_chunk, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_B, B->data + offset, bytes_this_chunk, cudaMemcpyHostToDevice);
+
+        int blocks_per_grid = (int)((elems_this_chunk + threads_per_block - 1) / threads_per_block);
+        tensor_mul_kernel<<<blocks_per_grid, threads_per_block>>>(d_A, d_B, d_out, elems_this_chunk);
+
+        cudaGetLastError();
+        cudaDeviceSynchronize();
+
+        cudaMemcpy(out->data + offset, d_out, bytes_this_chunk, cudaMemcpyDeviceToHost);
+    }
+
+    cudaFree(d_A);
+    cudaFree(d_B);
     cudaFree(d_out);
 }
 
@@ -427,3 +483,8 @@ void cuda_get_info() {
                prop.maxGridSize[0], prop.maxGridSize[1], prop.maxGridSize[2]);
     }
 }
+
+// int main(void) {
+
+//     return 0;
+// }
