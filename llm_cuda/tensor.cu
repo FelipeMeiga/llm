@@ -55,6 +55,17 @@ __global__ void tensor_rand_kernel(float *data, size_t elems_this_chunk, unsigne
     }
 }
 
+__global__ void matmul_chunk_kernel( const float *A_sub, const float *B_sub, float *C_sub, int m, int p, int n_sub) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < m && col < p) {
+        float sum = 0.0f;
+        for (int k = 0; k < n_sub; ++k)
+            sum += A_sub[row * n_sub + k] * B_sub[k * p + col];
+        C_sub[row * p + col] += sum;
+    }
+}
+
 Tensor *tensor_new(int ndim, const int *shape) {
     Tensor *t = (Tensor*)malloc(sizeof(Tensor));
     if (!t) {
@@ -302,6 +313,84 @@ void tensor_mul_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size) {
     cudaFree(d_out);
 }
 
+void tensor_matmul_cuda(Tensor *out, const Tensor *A, const Tensor *B, size_t chunk_size) {
+    if (A->ndim != 2 || B->ndim != 2) {
+        fprintf(stderr, "tensor_matmul_cuda_chunked: only 2d tensors are suported (A.ndim=%d, B.ndim=%d)\n", A->ndim, B->ndim);
+        exit(EXIT_FAILURE);
+    }
+    int m = A->shape[0];
+    int n = A->shape[1];
+    int n2 = B->shape[0];
+    int p = B->shape[1];
+    if (n != n2) {
+        fprintf(stderr, "tensor_matmul_cuda_chunked: incompatible internal dimensions (A.cols=%d, B.rows=%d)\n", n, n2);
+        exit(EXIT_FAILURE);
+    }
+    
+    size_t num_chunks = (n + chunk_size - 1) / chunk_size;
+
+    size_t bytes_A_sub = m * chunk_size * sizeof(float);
+    size_t bytes_B_sub = chunk_size * p * sizeof(float);
+    size_t bytes_out_sub = m * p * sizeof(float);
+
+    float *d_A_sub = NULL;
+    float *d_B_sub = NULL;
+    float *d_out_sub = NULL;
+
+    cudaMalloc((void**)&d_A_sub, bytes_A_sub);
+    cudaMalloc((void**)&d_B_sub, bytes_B_sub);
+    cudaMalloc((void**)&d_out_sub, bytes_out_sub);
+
+    const int TILE_DIM = 16;
+    dim3 threads_per_block(TILE_DIM, TILE_DIM);
+    dim3 blocks_per_grid(
+        (p + TILE_DIM - 1) / TILE_DIM,
+        (m + TILE_DIM - 1) / TILE_DIM
+    );
+
+    for (size_t chunk_idx = 0; chunk_idx < num_chunks; ++chunk_idx) {
+        int k_start = chunk_idx * chunk_size;
+        int n_sub = chunk_size;
+        if (k_start + n_sub > n) {
+            n_sub = n - k_start;
+        }
+        
+        for (int i = 0; i < m; ++i) {
+            const float *host_ptr_A = A->data + (size_t)i * A->stride[0] + (size_t)k_start * A->stride[1];
+            
+            float *dev_ptr_A = d_A_sub + (size_t)i * n_sub;
+            cudaMemcpy(dev_ptr_A, host_ptr_A, n_sub * sizeof(float), cudaMemcpyHostToDevice);
+        }
+        
+        for (int k_local = 0; k_local < n_sub; ++k_local) {
+            const float *host_ptr_B = B->data + (size_t)(k_start + k_local) * B->stride[0];
+            float *dev_ptr_B = d_B_sub + (size_t)k_local * p;
+            cudaMemcpy(dev_ptr_B, host_ptr_B, p * sizeof(float), cudaMemcpyHostToDevice);
+        }
+
+        cudaMemset(d_out_sub, 0, bytes_out_sub);
+
+        matmul_chunk_kernel<<<blocks_per_grid, threads_per_block>>>(d_A_sub, d_B_sub, d_out_sub, m, p, n_sub);
+        cudaDeviceSynchronize();
+
+        float *h_out_sub = (float*)malloc(bytes_out_sub);
+        cudaMemcpy(h_out_sub, d_out_sub, bytes_out_sub, cudaMemcpyDeviceToHost);
+
+        for (int i = 0; i < m; ++i) {
+            for (int j = 0; j < p; ++j) {
+                size_t idx_out = (size_t)i * out->stride[0] + (size_t)j * out->stride[1];
+                size_t idx_sub = (size_t)i * p + (size_t)j;
+                out->data[idx_out] += h_out_sub[idx_sub];
+            }
+        }
+        free(h_out_sub);
+    }
+
+    cudaFree(d_A_sub);
+    cudaFree(d_B_sub);
+    cudaFree(d_out_sub);
+}
+
 Tensor* tensor_ones_cuda(int ndim, const int *shape, size_t chunk_size) {
     Tensor *t = tensor_new(ndim, shape);
     if (!t) return NULL;
@@ -410,7 +499,7 @@ static size_t tensor_index(const Tensor *t, const int *coords) {
     return offset;
 }
 
-void __tensor_print_recursive(const Tensor *t, int dim, int *coords) {
+static void __tensor_print_recursive(const Tensor *t, int dim, int *coords) {
     if (dim == t->ndim) {
         size_t idx = tensor_index(t, coords);
         printf("%.2f", t->data[idx]);
@@ -485,6 +574,18 @@ void cuda_get_info() {
 }
 
 // int main(void) {
+//     int ndim = 2;
+//     int shape[ndim] = {6, 6};
+
+//     Tensor *A = tensor_rand_cuda(ndim, shape);
+//     tensor_show(A);
+
+//     Tensor *B = tensor_rand_cuda(ndim, shape);
+//     tensor_show(B);
+
+//     Tensor *out = tensor_new(ndim, shape);
+//     tensor_matmul_cuda(out, A, B);
+//     tensor_show(out);
 
 //     return 0;
 // }

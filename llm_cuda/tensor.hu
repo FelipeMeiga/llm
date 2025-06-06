@@ -17,6 +17,7 @@ void tensor_add_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size=256);
 void tensor_sub_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size=256);
 void tensor_scale_cuda(Tensor *out, Tensor *A, float alpha, size_t chunk_size=256);
 void tensor_mul_cuda(Tensor *out, Tensor *A, Tensor *B, size_t chunk_size=256);
+void tensor_matmul_cuda(Tensor *out, const Tensor *A, const Tensor *B, size_t chunk_size=256);
 
 Tensor* tensor_ones_cuda(int ndim, const int *shape, size_t chunk_size=256);
 Tensor* tensor_zeros_cuda(int ndim, const int *shape, size_t chunk_size=256);
@@ -24,5 +25,7 @@ Tensor* tensor_rand_cuda(int ndim, const int *shape, size_t chunk_size=256);
 
 void tensor_free(Tensor *t);
 void cuda_get_info();
+
+void tensor_show(Tensor *t);
 
 #endif
