@@ -50,7 +50,7 @@ __global__ void tensor_rand_kernel(float *data, size_t elems_this_chunk, int chu
     if (idx < elems_this_chunk) {
         curandState_t state;
         curand_init(chunk_seed, idx, 0, &state);
-        data[idx] = curand_uniform(&state);
+        data[idx] = curand_uniform(&state) * 2.0f - 1.0f;
     }
 }
 
@@ -71,6 +71,13 @@ __global__ void relu_kernel(float *data, size_t n) {
         if (data[idx] < 0.0f) {
             data[idx] = 0.0f;
         }
+    }
+}
+
+__global__ void relu_backward_kernel(const float *pre, const float *dA, float *dY, size_t n) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        dY[idx] = (pre[idx] > 0.0f) ? dA[idx] : 0.0f;
     }
 }
 
@@ -576,6 +583,67 @@ void tensor_relu_cuda(Tensor *A, size_t chunk_size) {
     cudaFree(d_data);
 }
 
+Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t chunk_size) {
+    // checagens de dimensão
+    if (pre->ndim != dA->ndim) {
+        fprintf(stderr,
+                "tensor_relu_backward_cuda: ndim mismatch (pre.ndim=%d, dA.ndim=%d)\n",
+                pre->ndim, dA->ndim);
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < pre->ndim; ++i) {
+        if (pre->shape[i] != dA->shape[i]) {
+            fprintf(stderr,
+                    "tensor_relu_backward_cuda: shape mismatch on dim %d (pre=%d, dA=%d)\n",
+                    i, pre->shape[i], dA->shape[i]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // cria tensor de saída
+    Tensor *dY = tensor_new(dA->ndim, dA->shape);
+    if (!dY) {
+        fprintf(stderr, "tensor_relu_backward_cuda: failed to allocate output\n");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t N = pre->size;
+    size_t num_chunks = (N + chunk_size - 1) / chunk_size;
+    const int threads_per_block = 256;
+
+    // buffers device (tamanho máximo de um chunk)
+    float *d_pre = NULL, *d_dA = NULL, *d_dY = NULL;
+    size_t max_bytes = chunk_size * sizeof(float);
+    cudaMalloc((void**)&d_pre, max_bytes);
+    cudaMalloc((void**)&d_dA,  max_bytes);
+    cudaMalloc((void**)&d_dY,  max_bytes);
+
+    for (size_t c = 0; c < num_chunks; ++c) {
+        size_t offset = c * chunk_size;
+        size_t this_n = chunk_size;
+        if (offset + this_n > N) this_n = N - offset;
+        size_t bytes = this_n * sizeof(float);
+
+        // copia pre e dA para o device
+        cudaMemcpy(d_pre, pre->data + offset, bytes, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_dA,  dA->data  + offset, bytes, cudaMemcpyHostToDevice);
+
+        int blocks = (int)((this_n + threads_per_block - 1) / threads_per_block);
+        relu_backward_kernel<<<blocks, threads_per_block>>>(d_pre, d_dA, d_dY, this_n);
+        cudaDeviceSynchronize();
+
+        // copia resultado de volta
+        cudaMemcpy(dY->data + offset, d_dY, bytes, cudaMemcpyDeviceToHost);
+    }
+
+    // libera buffers
+    cudaFree(d_pre);
+    cudaFree(d_dA);
+    cudaFree(d_dY);
+
+    return dY;
+}
+
 void tensor_show(Tensor *t) {
     printf("ndim: %d\n", t->ndim);
     printf("size: %zu\n", t->size);
@@ -633,22 +701,31 @@ void cuda_get_info() {
 }
 
 int main(void) {
-    srand(time(NULL));
-    
-    int ndim = 2;
-    int shape[ndim] = {6, 6};
+    srand((unsigned)time(NULL));
 
-    Tensor *A = tensor_rand_cuda(ndim, shape);
-    tensor_show(A);
+    int ndim = 1;
+    int shape[1] = {10};
+    size_t chunk_size = 5;
 
-    Tensor *B = tensor_rand_cuda(ndim, shape);
-    tensor_show(B);
+    Tensor *pre = tensor_rand_cuda(ndim, shape, chunk_size);
+    printf("Tensor pre (before ReLU):\n");
+    tensor_show(pre);
 
-    Tensor *out = tensor_new(ndim, shape);
-    tensor_matmul_cuda(out, A, B);
-    tensor_show(out);
-    tensor_relu_cuda(out);
-    tensor_show(out);
+    Tensor *dA = tensor_rand_cuda(ndim, shape, chunk_size);
+    printf("Gradient dA (upstream):\n");
+    tensor_show(dA);
+
+    tensor_relu_cuda(pre, chunk_size);
+    printf("Tensor pre after ReLU (A = max(0, pre)):\n");
+    tensor_show(pre);
+
+    Tensor *dY = tensor_relu_backward_cuda(pre, dA, chunk_size);
+    printf("Gradient dY (ReLU backward):\n");
+    tensor_show(dY);
+
+    tensor_free(pre);
+    tensor_free(dA);
+    tensor_free(dY);
 
     return 0;
 }
