@@ -584,7 +584,6 @@ void tensor_relu_cuda(Tensor *A, size_t chunk_size) {
 }
 
 Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t chunk_size) {
-    // checagens de dimensão
     if (pre->ndim != dA->ndim) {
         fprintf(stderr,
                 "tensor_relu_backward_cuda: ndim mismatch (pre.ndim=%d, dA.ndim=%d)\n",
@@ -600,7 +599,6 @@ Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t ch
         }
     }
 
-    // cria tensor de saída
     Tensor *dY = tensor_new(dA->ndim, dA->shape);
     if (!dY) {
         fprintf(stderr, "tensor_relu_backward_cuda: failed to allocate output\n");
@@ -611,7 +609,6 @@ Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t ch
     size_t num_chunks = (N + chunk_size - 1) / chunk_size;
     const int threads_per_block = 256;
 
-    // buffers device (tamanho máximo de um chunk)
     float *d_pre = NULL, *d_dA = NULL, *d_dY = NULL;
     size_t max_bytes = chunk_size * sizeof(float);
     cudaMalloc((void**)&d_pre, max_bytes);
@@ -624,7 +621,6 @@ Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t ch
         if (offset + this_n > N) this_n = N - offset;
         size_t bytes = this_n * sizeof(float);
 
-        // copia pre e dA para o device
         cudaMemcpy(d_pre, pre->data + offset, bytes, cudaMemcpyHostToDevice);
         cudaMemcpy(d_dA,  dA->data  + offset, bytes, cudaMemcpyHostToDevice);
 
@@ -632,11 +628,9 @@ Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t ch
         relu_backward_kernel<<<blocks, threads_per_block>>>(d_pre, d_dA, d_dY, this_n);
         cudaDeviceSynchronize();
 
-        // copia resultado de volta
         cudaMemcpy(dY->data + offset, d_dY, bytes, cudaMemcpyDeviceToHost);
     }
 
-    // libera buffers
     cudaFree(d_pre);
     cudaFree(d_dA);
     cudaFree(d_dY);
