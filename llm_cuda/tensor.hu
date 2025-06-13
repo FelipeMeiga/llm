@@ -23,6 +23,8 @@ Tensor* tensor_ones_cuda(int ndim, const int *shape, size_t chunk_size=256);
 Tensor* tensor_zeros_cuda(int ndim, const int *shape, size_t chunk_size=256);
 Tensor* tensor_rand_cuda(int ndim, const int *shape, size_t chunk_size=256);
 
+void tensor_relu_cuda(Tensor *A, size_t chunk_size=256);
+
 void tensor_free(Tensor *t);
 void cuda_get_info();
 
