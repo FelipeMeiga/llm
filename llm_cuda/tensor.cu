@@ -81,6 +81,40 @@ __global__ void relu_backward_kernel(const float *pre, const float *dA, float *d
     }
 }
 
+__global__ void gelu_kernel(const float *x, float *y, size_t n) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        float xi = x[idx];
+        
+        const float c0 = 0.7978845608f;
+        const float c1 = 0.044715f;
+        float x3 = xi * xi * xi;
+        float inner = c0 * (xi + c1 * x3);
+        float tanh_v = tanh(inner);
+        y[idx] = 0.5f * xi * (1.0f + tanh_v);
+    }
+}
+
+__global__ void gelu_backward_kernel(const float *x, const float *dY, float *dX, size_t n) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        float xi = x[idx];
+        
+        const float c0 = 0.7978845608f;
+        const float c1 = 0.044715f;
+        float x2 = xi * xi;
+        float x3 = x2 * xi;
+        float inner = c0 * (xi + c1 * x3);
+        float tanh_v = tanh(inner);
+        
+        float sech2 = 1.0f - tanh_v * tanh_v;
+        float term1 = 0.5f * (1.0f + tanh_v);
+        float term2 = 0.5f * xi * sech2 * (c0 * (1.0f + 3.0f * c1 * x2));
+        float grad = term1 + term2;
+        dX[idx] = grad * dY[idx];
+    }
+}
+
 Tensor *tensor_new(int ndim, const int *shape) {
     Tensor *t = (Tensor*)malloc(sizeof(Tensor));
     if (!t) {
@@ -542,13 +576,13 @@ static void __tensor_print_recursive(const Tensor *t, int dim, int *coords) {
     printf("]");
 }
 
-void tensor_relu_cuda(Tensor *A, size_t chunk_size) {
-    if (!A) {
+void tensor_relu_cuda(Tensor *X, size_t chunk_size) {
+    if (!X) {
         fprintf(stderr, "tensor_relu_cuda: input tensor is NULL\n");
         exit(EXIT_FAILURE);
     }
 
-    size_t N = A->size;
+    size_t N = X->size;
     size_t num_chunks = (N + chunk_size - 1) / chunk_size;
     size_t bytes_chunk = chunk_size * sizeof(float);
 
@@ -569,7 +603,7 @@ void tensor_relu_cuda(Tensor *A, size_t chunk_size) {
         }
         size_t bytes_this = elems_this_chunk * sizeof(float);
 
-        cudaMemcpy(d_data, A->data + offset, bytes_this, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_data, X->data + offset, bytes_this, cudaMemcpyHostToDevice);
 
         int blocks_per_grid = (int)((elems_this_chunk + threads_per_block - 1) / threads_per_block);
         relu_kernel<<<blocks_per_grid, threads_per_block>>>(d_data, elems_this_chunk);
@@ -577,7 +611,7 @@ void tensor_relu_cuda(Tensor *A, size_t chunk_size) {
         cudaGetLastError();
         cudaDeviceSynchronize();
 
-        cudaMemcpy(A->data + offset, d_data, bytes_this, cudaMemcpyDeviceToHost);
+        cudaMemcpy(X->data + offset, d_data, bytes_this, cudaMemcpyDeviceToHost);
     }
 
     cudaFree(d_data);
@@ -638,6 +672,59 @@ Tensor* tensor_relu_backward_cuda(const Tensor *pre, const Tensor *dA, size_t ch
     return dY;
 }
 
+void tensor_gelu_cuda(const Tensor *X, Tensor *Y, size_t chunk_size) {
+    size_t N = X->size;
+    size_t num_chunks = (N + chunk_size - 1) / chunk_size;
+    const int threads = 256;
+    float *d_x = nullptr;
+    float *d_y = nullptr;
+    size_t max_bytes = chunk_size * sizeof(float);
+    cudaMalloc(&d_x, max_bytes);
+    cudaMalloc(&d_y, max_bytes);
+
+    for (size_t c = 0; c < num_chunks; ++c) {
+        size_t off = c * chunk_size;
+        size_t n = chunk_size;
+        if (off + n > N) n = N - off;
+        size_t bytes = n * sizeof(float);
+        cudaMemcpy(d_x, X->data + off, bytes, cudaMemcpyHostToDevice);
+        int blocks = (int)((n + threads - 1) / threads);
+        gelu_kernel<<<blocks, threads>>>(d_x, d_y, n);
+        cudaDeviceSynchronize();
+        cudaMemcpy(Y->data + off, d_y, bytes, cudaMemcpyDeviceToHost);
+    }
+
+    cudaFree(d_x);
+    cudaFree(d_y);
+}
+
+Tensor* tensor_gelu_backward_cuda(const Tensor *X, const Tensor *dY, size_t chunk_size) {
+    Tensor *dX = tensor_new(dY->ndim, dY->shape);
+    size_t N = X->size;
+    size_t num_chunks = (N + chunk_size - 1) / chunk_size;
+    const int threads = 256;
+    float *d_x, *d_dY, *d_dX;
+    size_t max_bytes = chunk_size * sizeof(float);
+    cudaMalloc(&d_x, max_bytes);
+    cudaMalloc(&d_dY, max_bytes);
+    cudaMalloc(&d_dX, max_bytes);
+
+    for (size_t c = 0; c < num_chunks; ++c) {
+        size_t off = c * chunk_size;
+        size_t n = chunk_size;
+        if (off + n > N) n = N - off;
+        size_t bytes = n * sizeof(float);
+        cudaMemcpy(d_x, X->data + off, bytes, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_dY, dY->data + off, bytes, cudaMemcpyHostToDevice);
+        int blocks = (n + threads - 1) / threads;
+        gelu_backward_kernel<<<blocks, threads>>>(d_x, d_dY, d_dX, n);
+        cudaDeviceSynchronize();
+        cudaMemcpy(dX->data + off, d_dX, bytes, cudaMemcpyDeviceToHost);
+    }
+    cudaFree(d_x); cudaFree(d_dY); cudaFree(d_dX);
+    return dX;
+}
+
 void tensor_show(Tensor *t) {
     printf("ndim: %d\n", t->ndim);
     printf("size: %zu\n", t->size);
@@ -696,30 +783,6 @@ void cuda_get_info() {
 
 int main(void) {
     srand((unsigned)time(NULL));
-
-    int ndim = 1;
-    int shape[1] = {10};
-    size_t chunk_size = 5;
-
-    Tensor *pre = tensor_rand_cuda(ndim, shape, chunk_size);
-    printf("Tensor pre (before ReLU):\n");
-    tensor_show(pre);
-
-    Tensor *dA = tensor_rand_cuda(ndim, shape, chunk_size);
-    printf("Gradient dA (upstream):\n");
-    tensor_show(dA);
-
-    tensor_relu_cuda(pre, chunk_size);
-    printf("Tensor pre after ReLU (A = max(0, pre)):\n");
-    tensor_show(pre);
-
-    Tensor *dY = tensor_relu_backward_cuda(pre, dA, chunk_size);
-    printf("Gradient dY (ReLU backward):\n");
-    tensor_show(dY);
-
-    tensor_free(pre);
-    tensor_free(dA);
-    tensor_free(dY);
-
+    
     return 0;
 }
