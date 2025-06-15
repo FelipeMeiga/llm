@@ -9,6 +9,8 @@
 #include "tensor.hu"
 #include "utils.h"
 
+#define MAX_NDIM 8
+
 __global__ void tensor_add_kernel(const float *A, const float *B, float *out, size_t elems_this_chunk) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < elems_this_chunk)
@@ -113,6 +115,31 @@ __global__ void gelu_backward_kernel(const float *x, const float *dY, float *dX,
         float grad = term1 + term2;
         dX[idx] = grad * dY[idx];
     }
+}
+
+__global__ void transpose_nd_kernel(const float *A, float *T, size_t total, int ndim, const int *strideA, const int *strideT, int dim0, int dim1) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+
+    int coords[MAX_NDIM];
+    size_t rem = idx;
+    #pragma unroll
+    for (int d = 0; d < ndim; ++d) {
+        coords[d] = rem / strideA[d];
+        rem = rem % strideA[d];
+    }
+
+    int tmp = coords[dim0];
+    coords[dim0] = coords[dim1];
+    coords[dim1] = tmp;
+
+    size_t new_idx = 0;
+    #pragma unroll
+    for (int d = 0; d < ndim; ++d) {
+        new_idx += (size_t)coords[d] * strideT[d];
+    }
+
+    T[new_idx] = A[idx];
 }
 
 Tensor *tensor_new(int ndim, const int *shape) {
@@ -725,6 +752,45 @@ Tensor* tensor_gelu_backward_cuda(const Tensor *X, const Tensor *dY, size_t chun
     return dX;
 }
 
+void tensor_transpose_cuda(const Tensor *A, Tensor *T, int dim0, int dim1) {
+    if (A->ndim < 2 || dim0<0 || dim0>=A->ndim || dim1<0 || dim1>=A->ndim) {
+        fprintf(stderr, "tensor_transpose_cuda: invalid dims\n");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t total = A->size;
+    int ndim    = A->ndim;
+    size_t bytes = total * sizeof(float);
+    size_t stride_bytes = ndim * sizeof(int);
+
+    float *d_A, *d_T;
+    int   *d_strideA, *d_strideT;
+    cudaMalloc(&d_A, bytes);
+    cudaMalloc(&d_T, bytes);
+    cudaMalloc(&d_strideA, stride_bytes);
+    cudaMalloc(&d_strideT, stride_bytes);
+
+    cudaMemcpy(d_A, A->data, bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_strideA, A->stride, stride_bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_strideT, T->stride, stride_bytes, cudaMemcpyHostToDevice);
+
+    const int threads = 256;
+    int blocks = (int)((total + threads - 1) / threads);
+    transpose_nd_kernel<<<blocks,threads>>>(
+        d_A, d_T, total,
+        ndim, d_strideA, d_strideT,
+        dim0, dim1
+    );
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(T->data, d_T, bytes, cudaMemcpyDeviceToHost);
+
+    cudaFree(d_A);
+    cudaFree(d_T);
+    cudaFree(d_strideA);
+    cudaFree(d_strideT);
+}
+
 void tensor_show(Tensor *t) {
     printf("ndim: %d\n", t->ndim);
     printf("size: %zu\n", t->size);
@@ -783,6 +849,19 @@ void cuda_get_info() {
 
 int main(void) {
     srand((unsigned)time(NULL));
+
+    int dim = 2;
+    int shape[dim] = {5, 5};
+
+    Tensor *rand = tensor_rand_cuda(dim, shape);
+
+    Tensor *newt = tensor_new(dim, shape);
     
+    tensor_transpose_cuda(rand, newt, 0, 1);
+
+    tensor_show(rand);
+
+    tensor_show(newt);
+
     return 0;
 }
