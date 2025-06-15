@@ -31,10 +31,34 @@ __global__ void bias_grad_kernel(const float *dY, float *db, int B, int D, int s
 static void add_bias_cuda(Tensor *Y, const Tensor *b) {
     int B = Y->shape[0];
     int D = Y->shape[1];
+    size_t bytesY = Y->size * sizeof(float);
+    size_t bytesB = D * sizeof(float);
+
+    float *dY, *dB;
+    cudaMalloc(&dY, bytesY);
+    cudaMalloc(&dB, bytesB);
+
+    cudaMemcpy(dY, Y->data, bytesY, cudaMemcpyHostToDevice);
+    cudaMemcpy(dB, b->data, bytesB, cudaMemcpyHostToDevice);
+
     int threads = 256;
-    int blocks = (B * D + threads - 1) / threads;
-    add_bias_kernel<<<blocks, threads>>>(Y->data, b->data, B, D, Y->stride[0], Y->stride[1]);
-    cudaDeviceSynchronize();
+    int blocks  = (int)((B*D + threads - 1) / threads);
+    add_bias_kernel<<<blocks, threads>>>(
+        dY, dB, B, D,
+        Y->stride[0],
+        Y->stride[1]
+    );
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "add_bias_cuda kernel error: %s\n",
+                cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+
+    cudaMemcpy(Y->data, dY, bytesY, cudaMemcpyDeviceToHost);
+
+    cudaFree(dY);
+    cudaFree(dB);
 }
 
 static void compute_bias_grad_cuda(const Tensor *dY, Tensor *db) {
@@ -185,4 +209,3 @@ Tensor* linear_backward_cuda(Linear *lin, const Tensor *dY, size_t chunk_size) {
 
     return dX;
 }
-

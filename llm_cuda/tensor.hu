@@ -29,6 +29,7 @@ void tensor_gelu_cuda(const Tensor *X, Tensor *Y, size_t chunk_size=256);
 Tensor* tensor_gelu_backward_cuda(const Tensor *X, const Tensor *dY, size_t chunk_size=256);
 
 void tensor_transpose_cuda(const Tensor *A, Tensor *T, int dim0, int dim1);
+Tensor* tensor_reshape(const Tensor *A, int ndim, const int *new_shape);
 
 void tensor_free(Tensor *t);
 void cuda_get_info();

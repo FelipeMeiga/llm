@@ -634,8 +634,14 @@ void tensor_relu_cuda(Tensor *X, size_t chunk_size) {
 
         int blocks_per_grid = (int)((elems_this_chunk + threads_per_block - 1) / threads_per_block);
         relu_kernel<<<blocks_per_grid, threads_per_block>>>(d_data, elems_this_chunk);
+        
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            fprintf(stderr, "Kernel %s failed: %s\n",
+                    __func__, cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }
 
-        cudaGetLastError();
         cudaDeviceSynchronize();
 
         cudaMemcpy(X->data + offset, d_data, bytes_this, cudaMemcpyDeviceToHost);
@@ -791,6 +797,30 @@ void tensor_transpose_cuda(const Tensor *A, Tensor *T, int dim0, int dim1) {
     cudaFree(d_strideT);
 }
 
+Tensor* tensor_reshape(const Tensor *A, int ndim, const int *new_shape) { //tega
+    
+    size_t new_size = 1;
+    for (int i = 0; i < ndim; ++i) {
+        new_size *= new_shape[i];
+    }
+    
+    if (new_size != A->size) {
+        fprintf(stderr,
+                "tensor_reshape: invalid dims product (wants %zu elements, but tensor has %zu)\n",
+                new_size, A->size);
+        exit(EXIT_FAILURE);
+    }
+    
+    Tensor *t = tensor_new(ndim, new_shape);
+    if (!t) {
+        fprintf(stderr, "tensor_reshape: failed to allocate new tensor\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    memcpy(t->data, A->data, A->size * sizeof(float));
+    return t;
+}
+
 void tensor_show(Tensor *t) {
     printf("ndim: %d\n", t->ndim);
     printf("size: %zu\n", t->size);
@@ -847,21 +877,21 @@ void cuda_get_info() {
     }
 }
 
-int main(void) {
-    srand((unsigned)time(NULL));
+// int main(void) {
+//     srand((unsigned)time(NULL));
 
-    int dim = 2;
-    int shape[dim] = {5, 5};
+//     int dim = 2;
+//     int shape[dim] = {5, 5};
 
-    Tensor *rand = tensor_rand_cuda(dim, shape);
+//     Tensor *rand = tensor_rand_cuda(dim, shape);
 
-    Tensor *newt = tensor_new(dim, shape);
+//     Tensor *newt = tensor_new(dim, shape);
     
-    tensor_transpose_cuda(rand, newt, 0, 1);
+//     tensor_transpose_cuda(rand, newt, 0, 1);
 
-    tensor_show(rand);
+//     tensor_show(rand);
 
-    tensor_show(newt);
+//     tensor_show(newt);
 
-    return 0;
-}
+//     return 0;
+// }
