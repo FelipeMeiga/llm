@@ -1,0 +1,24 @@
+#ifndef LINEAR_H
+#define LINEAR_H
+
+#include "tensor.hu"
+
+typedef struct {
+    int in_dim, out_dim;
+    Tensor *W, *b;      // parâmetros
+    Tensor *dW, *db;    // gradientes
+    
+    Tensor *mW, *vW;
+    Tensor *mb, *vb;
+    int t;
+    Tensor *X;
+} Linear;
+
+Linear* linear_new(int in_dim, int out_dim);
+void linear_show(Linear* l);
+void linear_free(Linear *lin);
+
+Tensor* linear_forward_cuda(Linear *lin, const Tensor *X, size_t chunk_size=256);
+Tensor* linear_backward_cuda(Linear *lin, const Tensor *dY, size_t chunk_size=256);
+
+#endif
