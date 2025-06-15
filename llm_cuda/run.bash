@@ -1,2 +1,2 @@
-nvcc -o main tensor.cu utils.c
+nvcc -o main iris_test.cu linear.cu tensor.cu utils.c
 ./main
