@@ -9,7 +9,7 @@
 #include "tensor.hu"
 #include "utils.h"
 
-#define MAX_NDIM 8
+#define MAX_NDIM 256
 
 __global__ void tensor_add_kernel(const float *A, const float *B, float *out, size_t elems_this_chunk) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
