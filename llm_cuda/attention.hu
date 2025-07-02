@@ -1,0 +1,7 @@
+#ifndef ATTENTION_HU
+#define ATTENTION_HU
+#include "tensor.hu"
+
+void scaled_dot_product_attention(Tensor* Q, Tensor* K, Tensor* V, Tensor* attn_out, int seq_len, int d_k);
+
+#endif

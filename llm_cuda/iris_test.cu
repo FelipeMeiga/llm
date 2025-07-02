@@ -60,7 +60,7 @@ static void _vector_softmax(Tensor *A, int axis, int *coords) {
     }
 }
 
-static void _softmax_rec(Tensor *A, int axis, int dim, int *coords) { //tega
+static void _softmax_rec(Tensor *A, int axis, int dim, int *coords) {
     if (dim == A->ndim) {
         _vector_softmax(A, axis, coords);
         return;
@@ -76,7 +76,7 @@ static void _softmax_rec(Tensor *A, int axis, int dim, int *coords) { //tega
     }
 }
 
-void tensor_softmax(Tensor *A, int axis) { //tega 
+void tensor_softmax(Tensor *A, int axis) {
     if (!A) {
         fprintf(stderr, "tensor_softmax: input tensor is NULL\n");
         exit(EXIT_FAILURE);
