@@ -1,5 +1,5 @@
 #include <math.h>
-#include "attention.hu"
+#include "tensor.hu"
 
 __global__ void softmax_row(float* mat, int cols) {
     int row = blockIdx.x;
@@ -22,17 +22,28 @@ __global__ void softmax_row(float* mat, int cols) {
 }
 
 void scaled_dot_product_attention(Tensor* Q, Tensor* K, Tensor* V, Tensor* attn_out, int seq_len, int d_k) {
-    Tensor* Kt = tensor_new(2, (int[]){ d_k, seq_len });
+    int shapeKt[2] = { d_k, seq_len };
+    Tensor* Kt = tensor_new(2, shapeKt);
     tensor_transpose_cuda(K, Kt, 0, 1);
 
-    Tensor* scores = tensor_new(2, (int[]){ seq_len, seq_len });
+    int shapeScores[2] = { seq_len, seq_len };
+    Tensor* scores = tensor_new(2, shapeScores);
     tensor_matmul_cuda(scores, Q, Kt);
 
     float scale = 1.0f / sqrtf((float)d_k);
     tensor_scale_cuda(scores, scores, scale);
 
-    softmax_row<<<seq_len, 1>>>(scores->data, seq_len);
+    float *scores_data_gpu = NULL;
+    cudaMalloc((void**)&scores_data_gpu, sizeof(float)*scores->size);
+    cudaMemcpy(scores_data_gpu, scores->data, sizeof(float)*scores->size, cudaMemcpyHostToDevice);
+    
+    softmax_row<<<seq_len, 1>>>(scores_data_gpu, seq_len);
     cudaDeviceSynchronize();
+
+    cudaMemcpy(scores->data, scores_data_gpu, sizeof(float)*scores->size, cudaMemcpyDeviceToHost);
+    cudaFree(scores_data_gpu);
+
+    // tensor_show(scores);
 
     tensor_matmul_cuda(attn_out, scores, V);
 
