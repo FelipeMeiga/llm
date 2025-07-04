@@ -25,7 +25,7 @@ void scaled_dot_product_attention(Tensor* Q, Tensor* K, Tensor* V, Tensor* attn_
     int shapeKt[2] = { d_k, seq_len };
     Tensor* Kt = tensor_new(2, shapeKt);
     tensor_transpose_cuda(K, Kt, 0, 1);
-
+    
     int shapeScores[2] = { seq_len, seq_len };
     Tensor* scores = tensor_new(2, shapeScores);
     tensor_matmul_cuda(scores, Q, Kt);

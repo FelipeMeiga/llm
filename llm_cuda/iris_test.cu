@@ -31,7 +31,6 @@ void linear_update_adam(Linear *lin, float lr, float beta1, float beta2, float e
     }
 }
 
-
 static void _vector_softmax(Tensor *A, int axis, int *coords) {
     int len = A->shape[axis];
     size_t stride = A->stride[axis];
